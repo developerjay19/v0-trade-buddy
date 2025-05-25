@@ -24,7 +24,7 @@ import { TrendingUp, TrendingDown, Briefcase, X, AlertTriangle, Edit, Target, Sh
 import { format } from "date-fns"
 
 export function HoldingsSheet() {
-  const { stocks, user, editHolding, closeHolding, cancelOrder, createOrder } = useTrading()
+  const { stocks, user, editHolding, cancelOrder, createOrder } = useTrading()
   const [isOpen, setIsOpen] = useState(false)
   const [editingHolding, setEditingHolding] = useState<string | null>(null)
   const [stopLossPrice, setStopLossPrice] = useState<number>(0)
@@ -77,18 +77,42 @@ export function HoldingsSheet() {
   // Handle buy/sell for a specific stock
   const handleQuickTrade = (stockId: string, type: "buy" | "sell") => {
     const stock = getStockDetails(stockId)
-    if (!stock) return
+    if (!stock) {
+      console.warn(`Stock not found for ID: ${stockId}`)
+      return
+    }
 
     const quantity = Number.parseInt(prompt(`Enter quantity to ${type}:`) || "0")
     if (quantity > 0) {
       createOrder({
         stockId,
-        symbol: stock.name.toUpperCase().slice(0, 4),
+        symbol: stock.name ? stock.name.toUpperCase().slice(0, 4) : "UNKN",
         orderType: type,
         executionType: "market",
         quantity,
+        executedPrice: stock.currentValue,
+        executedAt: Date.now(),
       })
     }
+  }
+
+  // Handle close holding
+  const handleCloseHolding = (holdingId: string) => {
+    const holding = openHoldings.find((h) => h.id === holdingId)
+    if (!holding) return
+
+    const stock = getStockDetails(holding.stockId)
+    if (!stock) return
+
+    createOrder({
+      stockId: holding.stockId,
+      symbol: holding.symbol,
+      orderType: holding.holdingType === "long" ? "sell" : "buy",
+      executionType: "market",
+      quantity: Math.abs(holding.quantity),
+      executedPrice: stock.currentValue,
+      executedAt: Date.now(),
+    })
   }
 
   return (
@@ -99,7 +123,7 @@ export function HoldingsSheet() {
           className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-50 bg-white hover:bg-gray-50 shadow-lg border-2"
         >
           <Briefcase className="h-4 w-4 mr-2" />
-          Holdings & Orders ({openHoldings.length + activeOrders.length})
+          Holdings & Orders Positions
         </Button>
       </SheetTrigger>
       <SheetContent side="bottom" className="h-[80vh] overflow-y-auto">
@@ -213,13 +237,14 @@ export function HoldingsSheet() {
                                   <AlertDialogDescription>
                                     Are you sure you want to close your {holdingType.toLowerCase()} holding in{" "}
                                     {stock.name}? This will {holdingType === "long" ? "sell" : "buy"}{" "}
-                                    {Math.abs(holding.quantity)} shares at current market price.
+                                    {Math.abs(holding.quantity)} shares at the current market price of ₹
+                                    {stock.currentValue.toFixed(2)}.
                                   </AlertDialogDescription>
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>
                                   <AlertDialogCancel>Cancel</AlertDialogCancel>
                                   <AlertDialogAction
-                                    onClick={() => closeHolding(holding.id)}
+                                    onClick={() => handleCloseHolding(holding.id)}
                                     className={
                                       holdingType === "long"
                                         ? "bg-green-600 hover:bg-green-700"
@@ -366,7 +391,7 @@ export function HoldingsSheet() {
                 <div className="text-center py-12">
                   <AlertTriangle className="h-16 w-16 text-gray-400 mx-auto mb-4" />
                   <h3 className="text-xl font-semibold text-gray-900 mb-2">No Open Holdings</h3>
-                  <p className="text-gray-600 mb-4">You don't have any active holdings.</p>
+                  <p className="text-gray-600 mb-4">You don't have any active trading holdings.</p>
                   <Button onClick={() => setIsOpen(false)}>Start Trading</Button>
                 </div>
               )}
@@ -416,7 +441,11 @@ export function HoldingsSheet() {
                           <div>
                             <div className="text-sm text-gray-500">Price</div>
                             <div className="font-semibold text-gray-900">
-                              {order.limitPrice ? `₹${order.limitPrice.toFixed(2)}` : "Market Price"}
+                              {order.executedPrice 
+                                ? `₹${order.executedPrice.toFixed(2)}` 
+                                : order.limitPrice 
+                                ? `₹${order.limitPrice.toFixed(2)} (Limit)` 
+                                : "Market Price"}
                             </div>
                           </div>
                         </div>

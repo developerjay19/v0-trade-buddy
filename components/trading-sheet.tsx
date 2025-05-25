@@ -49,22 +49,22 @@ export function TradingSheet() {
   }, [selectedStock])
 
   // Calculate holdings for the selected stock
-  const currentHolding = selectedStock ? user.holdings.find((h) => h.stockId === selectedStock.id) : null
+  const currentHolding = selectedStock ? user.holdings.find((h) => h.stockId === selectedStock.id && h.status === "open") : null
 
   // Calculate profit/loss for the current holding
   const calculatePnL = () => {
     if (!selectedStock || !currentHolding) return 0
 
     const currentValue = currentHolding.quantity * selectedStock.currentValue
-    const investedValue = currentHolding.quantity * currentHolding.averageBuyPrice
+    const investedValue = currentHolding.quantity * currentHolding.averageEntryPrice
 
     return currentValue - investedValue
   }
 
   const pnl = calculatePnL()
   const pnlPercentage =
-    currentHolding && currentHolding.averageBuyPrice > 0
-      ? (pnl / Math.abs(currentHolding.quantity * currentHolding.averageBuyPrice)) * 100
+    currentHolding && currentHolding.averageEntryPrice > 0
+      ? (pnl / Math.abs(currentHolding.quantity * currentHolding.averageEntryPrice)) * 100
       : 0
 
   // Calculate margin used
@@ -81,33 +81,10 @@ export function TradingSheet() {
       orderType: "buy",
       executionType: buyExecutionType,
       quantity: buyQuantity,
-      price: buyExecutionType === "market" ? undefined : buyLimitPrice,
       limitPrice: buyExecutionType === "limit" ? buyLimitPrice : undefined,
+      stopPrice: useStopLoss ? stopLossPrice : undefined,
+      takeProfitPrice: useTarget ? targetPrice : undefined,
     })
-
-    // Create stop loss order if enabled
-    if (useStopLoss && stopLossPrice > 0) {
-      createOrder({
-        stockId: selectedStock.id,
-        symbol: selectedStock.name.toUpperCase().slice(0, 4),
-        orderType: "stoploss",
-        executionType: "market",
-        quantity: buyQuantity,
-        stopPrice: stopLossPrice,
-      })
-    }
-
-    // Create take profit order if enabled
-    if (useTarget && targetPrice > 0) {
-      createOrder({
-        stockId: selectedStock.id,
-        symbol: selectedStock.name.toUpperCase().slice(0, 4),
-        orderType: "take_profit",
-        executionType: "market",
-        quantity: buyQuantity,
-        takeProfitPrice: targetPrice,
-      })
-    }
   }
 
   // Handle sell
@@ -120,33 +97,10 @@ export function TradingSheet() {
       orderType: "sell",
       executionType: sellExecutionType,
       quantity: sellQuantity,
-      price: sellExecutionType === "market" ? undefined : sellLimitPrice,
       limitPrice: sellExecutionType === "limit" ? sellLimitPrice : undefined,
+      stopPrice: useStopLoss ? stopLossPrice : undefined,
+      takeProfitPrice: useTarget ? targetPrice : undefined,
     })
-
-    // Create stop loss order if enabled
-    if (useStopLoss && stopLossPrice > 0) {
-      createOrder({
-        stockId: selectedStock.id,
-        symbol: selectedStock.name.toUpperCase().slice(0, 4),
-        orderType: "stoploss",
-        executionType: "market",
-        quantity: sellQuantity,
-        stopPrice: stopLossPrice,
-      })
-    }
-
-    // Create take profit order if enabled
-    if (useTarget && targetPrice > 0) {
-      createOrder({
-        stockId: selectedStock.id,
-        symbol: selectedStock.name.toUpperCase().slice(0, 4),
-        orderType: "take_profit",
-        executionType: "market",
-        quantity: sellQuantity,
-        takeProfitPrice: targetPrice,
-      })
-    }
   }
 
   return (
@@ -231,25 +185,37 @@ export function TradingSheet() {
               <h3 className="text-lg font-semibold text-gray-900">Current Position</h3>
               {currentHolding ? (
                 <div className="bg-gradient-to-r from-purple-50 to-indigo-50 p-4 rounded-lg border border-purple-200 space-y-3">
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-2 gap-4 mb-3">
                     <div>
-                      <div className="text-sm text-purple-600 font-medium">Quantity</div>
-                      <div className="text-lg font-bold text-purple-700">
-                        {currentHolding.quantity} shares
-                        {currentHolding.quantity < 0 && (
-                          <Badge variant="destructive" className="ml-2">
-                            SHORT
-                          </Badge>
+                      <div className="text-sm text-gray-500">Total Quantity</div>
+                      <div className="font-semibold text-gray-900">{Math.abs(currentHolding.quantity)} shares</div>
+                    </div>
+                    <div>
+                      <div className="text-sm text-gray-500">Available Quantity</div>
+                      <div className="font-semibold text-gray-900">
+                        {Math.abs(currentHolding.availableQuantity)} shares
+                        {currentHolding.availableQuantity < currentHolding.quantity && (
+                          <span className="text-xs text-orange-600 ml-1">
+                            ({Math.abs(currentHolding.quantity - currentHolding.availableQuantity)} in orders)
+                          </span>
                         )}
                       </div>
                     </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4 mb-3">
                     <div>
-                      <div className="text-sm text-purple-600 font-medium">Avg. Price</div>
-                      <div className="text-lg font-bold text-purple-700">
-                        ₹{currentHolding.averageBuyPrice.toFixed(2)}
+                      <div className="text-sm text-gray-500">Avg. Entry Price</div>
+                      <div className="font-semibold text-gray-900">
+                        ₹{currentHolding.averageEntryPrice.toFixed(2)}
                       </div>
                     </div>
+                    <div>
+                      <div className="text-sm text-gray-500">Leverage</div>
+                      <div className="font-semibold text-gray-900">{currentHolding.leverage}x</div>
+                    </div>
                   </div>
+
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <div className="text-sm text-purple-600 font-medium">Current Value</div>
@@ -649,10 +615,10 @@ export function TradingSheet() {
                       <span className="text-sm text-red-700 font-medium">Profit/Loss:</span>
                       <span
                         className={`font-bold ${
-                          sellPrice > currentHolding.averageBuyPrice ? "text-green-600" : "text-red-600"
+                          sellPrice > currentHolding.averageEntryPrice ? "text-green-600" : "text-red-600"
                         }`}
                       >
-                        ₹{((sellPrice - currentHolding.averageBuyPrice) * sellQuantity).toFixed(2)}
+                        ₹{((sellPrice - currentHolding.averageEntryPrice) * sellQuantity).toFixed(2)}
                       </span>
                     </div>
                   )}

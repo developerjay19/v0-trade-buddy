@@ -7,7 +7,7 @@ import { AppHeader } from "@/components/app-header"
 import { StockTicker } from "@/components/stock-ticker"
 import { TradingSheet } from "@/components/trading-sheet"
 import { StockListSheet } from "@/components/stock-list-sheet"
-import { PositionsSheet } from "@/components/positions-sheet"
+import { HoldingsSheet } from "@/components/holdings-sheet"
 import { NotificationToast } from "@/components/notification-toast"
 
 const inter = Inter({ subsets: ["latin"] })
@@ -33,7 +33,7 @@ export default function RootLayout({
             {children}
             <TradingSheet />
             <StockListSheet />
-            <PositionsSheet />
+            <HoldingsSheet />
             <NotificationToast />
           </div>
         </TradingProvider>

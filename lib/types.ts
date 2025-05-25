@@ -28,6 +28,7 @@ export interface Holding {
   status: "open" | "closed"
   holdingType: "long" | "short"
   quantity: number
+  availableQuantity: number
   averageEntryPrice: number
   averageExitPrice?: number
   unrealizedPnL: number
@@ -38,6 +39,22 @@ export interface Holding {
   marginUsed: number
   createdAt: number
   updatedAt: number
+  closedAt?: number
+}
+
+export interface HoldingHistory {
+  holdingId: string
+  stockId: string
+  symbol: string
+  holdingType: "long" | "short"
+  quantity: number
+  averageEntryPrice: number
+  averageExitPrice: number
+  realizedPnL: number
+  leverage: number
+  marginUsed: number
+  createdAt: number
+  closedAt: number
 }
 
 export interface Order {

@@ -2,12 +2,12 @@
 
 import type React from "react"
 import { createContext, useContext, useEffect, useState } from "react"
-import type { Stock, User, Holding, Transaction, Order, Notification } from "./types"
+import type { Stock, User, Holding, Transaction, Order, Notification, HoldingHistory } from "./types"
 import { v4 as uuidv4 } from "uuid"
 
 interface TradingContextType {
   stocks: Stock[]
-  user: User
+  user: User & { holdingHistory: HoldingHistory[] }
   selectedStock: Stock | null
   margin: number
   notifications: Notification[]
@@ -26,18 +26,19 @@ interface TradingContextType {
   clearNotifications: () => void
 }
 
-const defaultUser: User = {
+const defaultUser: User & { holdingHistory: HoldingHistory[] } = {
   balance: 100000,
   holdings: [],
   orders: [],
   transactions: [],
+  holdingHistory: [],
 }
 
 const TradingContext = createContext<TradingContextType | undefined>(undefined)
 
 export function TradingProvider({ children }: { children: React.ReactNode }) {
   const [stocks, setStocks] = useState<Stock[]>([])
-  const [user, setUser] = useState<User>(defaultUser)
+  const [user, setUser] = useState<User & { holdingHistory: HoldingHistory[] }>(defaultUser)
   const [selectedStock, setSelectedStock] = useState<Stock | null>(null)
   const [margin, setMargin] = useState<number>(1)
   const [notifications, setNotifications] = useState<Notification[]>([])
@@ -186,309 +187,224 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  // Create order - simplified logic
-  const createOrder = (orderData: Omit<Order, "id" | "createdAt" | "updatedAt" | "status">) => {
-    const stock = stocks.find((s) => s.id === orderData.stockId)
-    if (!stock) return
+  // Create or update holding
+  const createOrUpdateHolding = (
+    stockId: string,
+    orderType: "buy" | "sell",
+    quantity: number,
+    price: number,
+    stopLossPrice?: number,
+    takeProfitPrice?: number
+  ): Holding | null => {
+    const stock = stocks.find((s) => s.id === stockId)
+    if (!stock) return null
 
-    const newOrder: Order = {
-      id: uuidv4(),
-      status: "pending",
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      ...orderData,
-      symbol: stock.name.toUpperCase().slice(0, 4),
-    }
+    // Find existing open holding for this stock
+    const existingHolding = user.holdings.find(
+      (h) => h.stockId === stockId && h.status === "open"
+    )
 
-    setUser((prevUser) => ({
-      ...prevUser,
-      orders: [...prevUser.orders, newOrder],
-    }))
+    if (existingHolding) {
+      // Update existing holding
+      const newQuantity = orderType === "buy" 
+        ? existingHolding.quantity + quantity
+        : existingHolding.quantity
 
-    // If market order, execute immediately
-    if (orderData.executionType === "market") {
-      setTimeout(() => executeOrder(newOrder.id), 100)
+      const newAvailableQuantity = orderType === "buy"
+        ? existingHolding.availableQuantity + quantity
+        : existingHolding.availableQuantity - quantity
+
+      const newAveragePrice = orderType === "buy"
+        ? ((existingHolding.quantity * existingHolding.averageEntryPrice) + (quantity * price)) / newQuantity
+        : existingHolding.averageEntryPrice
+
+      // Check if holding should be closed
+      if (newAvailableQuantity <= 0) {
+        // Move to history
+        const holdingHistory: HoldingHistory = {
+          holdingId: existingHolding.id,
+          stockId: existingHolding.stockId,
+          symbol: existingHolding.symbol,
+          holdingType: existingHolding.holdingType,
+          quantity: existingHolding.quantity,
+          averageEntryPrice: existingHolding.averageEntryPrice,
+          averageExitPrice: price,
+          realizedPnL: existingHolding.realizedPnL,
+          leverage: existingHolding.leverage,
+          marginUsed: existingHolding.marginUsed,
+          createdAt: existingHolding.createdAt,
+          closedAt: Date.now(),
+        }
+
+        setUser((prev) => ({
+          ...prev,
+          holdingHistory: [...prev.holdingHistory, holdingHistory],
+          holdings: prev.holdings.filter(h => h.id !== existingHolding.id)
+        }))
+
+        return null
+      }
+
+      const updatedHolding: Holding = {
+        ...existingHolding,
+        quantity: newQuantity,
+        availableQuantity: newAvailableQuantity,
+        averageEntryPrice: newAveragePrice,
+        stopLossPrice: stopLossPrice || existingHolding.stopLossPrice,
+        takeProfitPrice: takeProfitPrice || existingHolding.takeProfitPrice,
+        updatedAt: Date.now(),
+      }
+      return updatedHolding
     } else {
-      // Limit order - set status to open (waiting for trigger)
-      setUser((prevUser) => ({
-        ...prevUser,
-        orders: prevUser.orders.map((o) => (o.id === newOrder.id ? { ...o, status: "open" } : o)),
-      }))
+      // Create new holding
+      const newHolding: Holding = {
+        id: uuidv4(),
+        stockId,
+        symbol: stock.name.toUpperCase().slice(0, 4),
+        status: "open" as const,
+        holdingType: orderType === "buy" ? "long" : "short",
+        quantity: quantity,
+        availableQuantity: quantity,
+        averageEntryPrice: price,
+        unrealizedPnL: 0,
+        realizedPnL: 0,
+        stopLossPrice,
+        takeProfitPrice,
+        leverage: margin,
+        marginUsed: (quantity * price) / margin,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      }
+      return newHolding
     }
-
-    addNotification({
-      type: "info",
-      title: "Order Placed",
-      message: `${newOrder.executionType.toUpperCase()} ${newOrder.orderType.toUpperCase()} order placed for ${stock.name}.`,
-    })
   }
 
-  // Execute order and create/update holding
-  const executeOrder = (orderId: string) => {
-    const order = user.orders.find((o) => o.id === orderId)
-    const stock = stocks.find((s) => s.id === order?.stockId)
-
-    if (!order || !stock || order.status === "executed" || order.status === "cancelled") return
-
-    // Determine execution price
-    const executionPrice = order.limitPrice || stock.currentValue
-    const totalCost = executionPrice * order.quantity
-    const marginAdjustedCost = totalCost / margin
-
-    // Check balance for buy orders
-    if (order.orderType === "buy" && user.balance < marginAdjustedCost) {
-      setUser((prevUser) => ({
-        ...prevUser,
-        orders: prevUser.orders.map((o) =>
-          o.id === orderId ? { ...o, status: "cancelled", updatedAt: Date.now() } : o,
-        ),
-      }))
-
+  // Create order and update holding
+  const createOrder = async (orderData: Omit<Order, "id" | "createdAt" | "updatedAt" | "status">) => {
+    const stock = stocks.find((s) => s.id === orderData.stockId)
+    if (!stock) {
       addNotification({
         type: "error",
-        title: "Order Cancelled",
-        message: `Insufficient balance for ${stock.name} order.`,
+        title: "Error",
+        message: "Stock not found",
       })
       return
     }
 
-    // Update stock price with market impact
-    const priceImpact = (stock.priceEvolution / 100) * stock.initialValue * (order.quantity / 100)
-    const newPrice =
-      order.orderType === "buy"
-        ? Math.max(stock.currentValue + priceImpact, 0.01)
-        : Math.max(stock.currentValue - priceImpact, 0.01)
+    // For market orders, execute immediately
+    if (orderData.executionType === "market") {
+      const executedPrice = stock.currentValue
+      const executedAt = Date.now()
 
-    setStocks((prevStocks) =>
-      prevStocks.map((s) =>
-        s.id === stock.id
-          ? {
-              ...s,
-              currentValue: newPrice,
-              availableShares:
-                order.orderType === "buy" ? s.availableShares - order.quantity : s.availableShares + order.quantity,
-              history: [...s.history, { timestamp: Date.now(), price: newPrice }],
-              volume: [
-                ...s.volume,
-                { timestamp: Date.now(), volume: order.quantity, type: order.orderType === "buy" ? "buy" : "sell" },
-              ],
-            }
-          : s,
-      ),
-    )
+      // Create or update holding for buy/sell orders
+      if (orderData.orderType === "buy" || orderData.orderType === "sell") {
+        const holding = createOrUpdateHolding(
+          orderData.stockId,
+          orderData.orderType,
+          orderData.quantity,
+          executedPrice,
+          orderData.stopPrice,
+          orderData.takeProfitPrice
+        )
 
-    // Create or update holding
-    const existingHolding = user.holdings.find((h) => h.stockId === order.stockId && h.status === "open")
-    let updatedHoldings = [...user.holdings]
-    let holdingId = existingHolding?.id
+        if (holding) {
+          // Update user holdings
+          setUser((prev) => ({
+            ...prev,
+            holdings: [
+              ...prev.holdings.filter((h) => !(h.stockId === orderData.stockId && h.status === "open")),
+              holding,
+            ],
+          }))
 
-    if (order.orderType === "buy") {
-      if (existingHolding) {
-        if (existingHolding.holdingType === "short") {
-          // Covering short holding
-          const newQuantity = existingHolding.quantity - order.quantity
-          if (newQuantity <= 0) {
-            // Close short holding
-            const realizedPnL = (existingHolding.averageEntryPrice - executionPrice) * existingHolding.quantity
-            updatedHoldings = updatedHoldings.map((h) =>
-              h.id === existingHolding.id
-                ? {
-                    ...h,
-                    status: "closed",
-                    averageExitPrice: executionPrice,
-                    realizedPnL: realizedPnL,
-                    updatedAt: Date.now(),
-                  }
-                : h,
-            )
-
-            // If over-buying, create new long holding
-            if (newQuantity < 0) {
-              const newHolding: Holding = {
+          // Create executed order
+          const order: Order = {
                 id: uuidv4(),
-                stockId: order.stockId,
-                symbol: stock.name.toUpperCase().slice(0, 4),
-                status: "open",
-                holdingType: "long",
-                quantity: Math.abs(newQuantity),
-                averageEntryPrice: executionPrice,
-                unrealizedPnL: 0,
-                realizedPnL: 0,
-                leverage: margin,
-                marginUsed: (Math.abs(newQuantity) * executionPrice) / margin,
+            ...orderData,
+            status: "executed",
+            executedPrice,
+            executedAt,
+            holdingId: holding.id,
                 createdAt: Date.now(),
                 updatedAt: Date.now(),
-              }
-              updatedHoldings.push(newHolding)
-              holdingId = newHolding.id
-            }
-          } else {
-            // Reduce short holding
-            updatedHoldings = updatedHoldings.map((h) =>
-              h.id === existingHolding.id ? { ...h, quantity: newQuantity, updatedAt: Date.now() } : h,
-            )
           }
-        } else {
-          // Add to long holding
-          const totalQuantity = existingHolding.quantity + order.quantity
-          const totalCost =
-            existingHolding.quantity * existingHolding.averageEntryPrice + order.quantity * executionPrice
-          updatedHoldings = updatedHoldings.map((h) =>
-            h.id === existingHolding.id
-              ? {
-                  ...h,
-                  quantity: totalQuantity,
-                  averageEntryPrice: totalCost / totalQuantity,
-                  marginUsed: h.marginUsed + marginAdjustedCost,
-                  updatedAt: Date.now(),
-                }
-              : h,
-          )
-        }
-      } else {
-        // Create new long holding
-        const newHolding: Holding = {
+
+          // Create stop loss order if specified
+          if (holding.stopLossPrice) {
+            const stopLossOrder: Order = {
           id: uuidv4(),
-          stockId: order.stockId,
-          symbol: stock.name.toUpperCase().slice(0, 4),
-          status: "open",
-          holdingType: "long",
-          quantity: order.quantity,
-          averageEntryPrice: executionPrice,
-          unrealizedPnL: 0,
-          realizedPnL: 0,
-          leverage: margin,
-          marginUsed: marginAdjustedCost,
+              stockId: orderData.stockId,
+              symbol: orderData.symbol,
+              orderType: "stoploss",
+              executionType: "market",
+              quantity: orderData.quantity,
+              stopPrice: holding.stopLossPrice,
+              status: "pending",
+              holdingId: holding.id,
           createdAt: Date.now(),
           updatedAt: Date.now(),
         }
-        updatedHoldings.push(newHolding)
-        holdingId = newHolding.id
-      }
-    } else {
-      // Sell order
-      if (existingHolding && existingHolding.holdingType === "long") {
-        if (existingHolding.quantity <= order.quantity) {
-          // Close or reverse long holding
-          const realizedPnL = (executionPrice - existingHolding.averageEntryPrice) * existingHolding.quantity
-          updatedHoldings = updatedHoldings.map((h) =>
-            h.id === existingHolding.id
-              ? {
-                  ...h,
-                  status: "closed",
-                  averageExitPrice: executionPrice,
-                  realizedPnL: realizedPnL,
-                  updatedAt: Date.now(),
-                }
-              : h,
-          )
+            setUser((prev) => ({
+              ...prev,
+              orders: [...prev.orders, stopLossOrder],
+            }))
+          }
 
-          // If over-selling, create new short holding
-          if (existingHolding.quantity < order.quantity) {
-            const remainingQuantity = order.quantity - existingHolding.quantity
-            const newHolding: Holding = {
+          // Create take profit order if specified
+          if (holding.takeProfitPrice) {
+            const takeProfitOrder: Order = {
               id: uuidv4(),
-              stockId: order.stockId,
-              symbol: stock.name.toUpperCase().slice(0, 4),
-              status: "open",
-              holdingType: "short",
-              quantity: remainingQuantity,
-              averageEntryPrice: executionPrice,
-              unrealizedPnL: 0,
-              realizedPnL: 0,
-              leverage: margin,
-              marginUsed: (remainingQuantity * executionPrice) / margin,
+              stockId: orderData.stockId,
+              symbol: orderData.symbol,
+              orderType: "take_profit",
+              executionType: "market",
+              quantity: orderData.quantity,
+              takeProfitPrice: holding.takeProfitPrice,
+              status: "pending",
+              holdingId: holding.id,
               createdAt: Date.now(),
               updatedAt: Date.now(),
             }
-            updatedHoldings.push(newHolding)
-            holdingId = newHolding.id
+            setUser((prev) => ({
+              ...prev,
+              orders: [...prev.orders, takeProfitOrder],
+            }))
           }
-        } else {
-          // Reduce long holding
-          updatedHoldings = updatedHoldings.map((h) =>
-            h.id === existingHolding.id ? { ...h, quantity: h.quantity - order.quantity, updatedAt: Date.now() } : h,
-          )
-        }
-      } else {
-        // Create new short holding or add to existing short
-        if (existingHolding && existingHolding.holdingType === "short") {
-          const totalQuantity = existingHolding.quantity + order.quantity
-          const totalCost =
-            existingHolding.quantity * existingHolding.averageEntryPrice + order.quantity * executionPrice
-          updatedHoldings = updatedHoldings.map((h) =>
-            h.id === existingHolding.id
-              ? {
-                  ...h,
-                  quantity: totalQuantity,
-                  averageEntryPrice: totalCost / totalQuantity,
-                  marginUsed: h.marginUsed + marginAdjustedCost,
-                  updatedAt: Date.now(),
-                }
-              : h,
-          )
-        } else {
-          const newHolding: Holding = {
-            id: uuidv4(),
-            stockId: order.stockId,
-            symbol: stock.name.toUpperCase().slice(0, 4),
-            status: "open",
-            holdingType: "short",
-            quantity: order.quantity,
-            averageEntryPrice: executionPrice,
-            unrealizedPnL: 0,
-            realizedPnL: 0,
-            leverage: margin,
-            marginUsed: marginAdjustedCost,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          }
-          updatedHoldings.push(newHolding)
-          holdingId = newHolding.id
+
+          // Update user orders
+          setUser((prev) => ({
+            ...prev,
+            orders: [...prev.orders, order],
+          }))
+
+          addNotification({
+            type: "success",
+            title: "Order Executed",
+            message: `${orderData.orderType.toUpperCase()} order executed at ₹${executedPrice.toFixed(2)}`,
+          })
         }
       }
-    }
+        } else {
+      // For limit orders, create pending order
+      const order: Order = {
+            id: uuidv4(),
+        ...orderData,
+        status: "pending",
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+      }
 
-    // Create transaction
-    const transaction: Transaction = {
-      id: uuidv4(),
-      stockId: order.stockId,
-      stockName: stock.name,
-      type: order.orderType === "buy" ? "buy" : "sell",
-      quantity: order.quantity,
-      price: executionPrice,
-      margin: margin,
-      timestamp: Date.now(),
-      total: totalCost,
-      orderId: order.id,
-    }
-
-    // Update user
-    setUser((prevUser) => ({
-      ...prevUser,
-      balance:
-        order.orderType === "buy" ? prevUser.balance - marginAdjustedCost : prevUser.balance + totalCost / margin,
-      holdings: updatedHoldings,
-      orders: prevUser.orders.map((o) =>
-        o.id === orderId
-          ? {
-              ...o,
-              status: "executed",
-              executedAt: Date.now(),
-              executedPrice: executionPrice,
-              updatedAt: Date.now(),
-              holdingId: holdingId,
-            }
-          : o,
-      ),
-      transactions: [...prevUser.transactions, transaction],
+      setUser((prev) => ({
+        ...prev,
+        orders: [...prev.orders, order],
     }))
 
     addNotification({
       type: "success",
-      title: "Order Executed",
-      message: `${order.orderType.toUpperCase()} order executed for ${stock.name} at ₹${executionPrice.toFixed(2)}.`,
+        title: "Order Created",
+        message: `${orderData.orderType.toUpperCase()} limit order placed at ₹${orderData.limitPrice?.toFixed(2)}`,
     })
+    }
   }
 
   // Cancel order
@@ -573,9 +489,9 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     const holding = user.holdings.find((h) => h.id === holdingId)
     const stock = stocks.find((s) => s.id === holding?.stockId)
 
-    if (!holding || !stock || holding.status !== "open") return
+    if (!holding || !stock || holding.status !== "open" || holding.availableQuantity <= 0) return
 
-    // Create market order to close holding
+    // Create market order to close remaining quantity
     const closeOrder: Order = {
       id: uuidv4(),
       stockId: holding.stockId,
@@ -583,94 +499,44 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       orderType: holding.holdingType === "long" ? "sell" : "buy",
       executionType: "market",
       status: "pending",
-      quantity: holding.quantity,
+      quantity: holding.availableQuantity, // Use available quantity
       holdingId: holdingId,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     }
 
-    setUser((prevUser) => ({
-      ...prevUser,
-      orders: [...prevUser.orders, closeOrder],
-    }))
-
-    executeOrder(closeOrder.id)
+    createOrder({
+      ...closeOrder,
+      status: "pending",
+    })
 
     addNotification({
       type: "info",
-      title: "Holding Closed",
-      message: `${holding.holdingType.toUpperCase()} holding in ${holding.symbol} closed.`,
+      title: "Closing Holding",
+      message: `Creating order to close ${holding.availableQuantity} shares of ${holding.symbol}`,
     })
   }
 
   // Check for limit order triggers
   const checkOrderTriggers = (currentStocks: Stock[]) => {
-    const triggeredOrders: string[] = []
+    // Check limit orders
+    const openOrders = user.orders.filter((order) => order.status === "open")
+    if (openOrders.length === 0) return
 
-    user.orders.forEach((order) => {
-      if (order.status !== "open") return
-
+    openOrders.forEach((order) => {
       const stock = currentStocks.find((s) => s.id === order.stockId)
       if (!stock) return
 
-      let shouldTrigger = false
-
-      // Check limit orders
       if (order.executionType === "limit" && order.limitPrice) {
         if (order.orderType === "buy" && stock.currentValue <= order.limitPrice) {
-          shouldTrigger = true
+          // Execute buy limit order
+          executeOrder(order.id)
+          createHolding(order)
         } else if (order.orderType === "sell" && stock.currentValue >= order.limitPrice) {
-          shouldTrigger = true
+          // Execute sell limit order
+          executeOrder(order.id)
+          createHolding(order)
         }
-      }
-
-      // Check stop loss orders
-      if (order.orderType === "stoploss" && order.stopPrice) {
-        const holding = user.holdings.find((h) => h.id === order.holdingId && h.status === "open")
-        if (holding) {
-          if (holding.holdingType === "long" && stock.currentValue <= order.stopPrice) {
-            shouldTrigger = true
-          } else if (holding.holdingType === "short" && stock.currentValue >= order.stopPrice) {
-            shouldTrigger = true
-          }
-        }
-      }
-
-      // Check take profit orders
-      if (order.orderType === "take_profit" && order.takeProfitPrice) {
-        const holding = user.holdings.find((h) => h.id === order.holdingId && h.status === "open")
-        if (holding) {
-          if (holding.holdingType === "long" && stock.currentValue >= order.takeProfitPrice) {
-            shouldTrigger = true
-          } else if (holding.holdingType === "short" && stock.currentValue <= order.takeProfitPrice) {
-            shouldTrigger = true
-          }
-        }
-      }
-
-      if (shouldTrigger) {
-        triggeredOrders.push(order.id)
-      }
-    })
-
-    // Execute triggered orders
-    triggeredOrders.forEach((orderId) => {
-      const order = user.orders.find((o) => o.id === orderId)
-      if (order) {
-        setUser((prevUser) => ({
-          ...prevUser,
-          orders: prevUser.orders.map((o) =>
-            o.id === orderId ? { ...o, status: "triggered", updatedAt: Date.now() } : o,
-          ),
-        }))
-
-        addNotification({
-          type: "info",
-          title: "Order Triggered",
-          message: `${order.orderType.toUpperCase()} order for ${order.symbol} triggered.`,
-        })
-
-        setTimeout(() => executeOrder(orderId), 500)
       }
     })
   }

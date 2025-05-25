@@ -72,7 +72,7 @@ export function AppHeader() {
         <div className="flex items-center gap-4">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="text-white border-white/30 hover:bg-white/20">
+              <Button variant="outline" size="sm" className="text-black">
                 <Settings className="h-4 w-4 mr-2" />
                 Settings
               </Button>

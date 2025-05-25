@@ -6,7 +6,7 @@ import Link from "next/link"
 import { useTrading } from "@/lib/trading-context"
 import { TradingSheet } from "@/components/trading-sheet"
 import { StockListSheet } from "@/components/stock-list-sheet"
-import { PositionsSheet } from "@/components/positions-sheet"
+import { HoldingsSheet } from "@/components/holdings-sheet"
 import { CreateStockModal } from "@/components/create-stock-modal"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -372,7 +372,7 @@ export default function HomePage() {
       {/* Trading Sheets */}
       <TradingSheet />
       <StockListSheet />
-      <PositionsSheet />
+      <HoldingsSheet />
     </div>
   )
 }

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import type { Stock } from "@/lib/types"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -14,6 +14,8 @@ interface EnhancedGraphPanelProps {
 export function EnhancedGraphPanel({ stock }: EnhancedGraphPanelProps) {
   const [timeRange, setTimeRange] = useState<"1m" | "5m" | "15m" | "1h" | "all">("15m")
   const [chartData, setChartData] = useState<any[]>([])
+  const prevStockRef = useRef<Stock | null>(null)
+  const chartDataRef = useRef<any[]>([])
 
   useEffect(() => {
     if (!stock) return
@@ -40,29 +42,66 @@ export function EnhancedGraphPanel({ stock }: EnhancedGraphPanelProps) {
         timeLimit = 0 // All data
     }
 
-    // Filter price history
-    const filteredHistory = stock.history.filter((point) => point.timestamp >= timeLimit)
-    const filteredVolume = stock.volume.filter((point) => point.timestamp >= timeLimit)
+    // Check if it's a new stock or time range changed
+    if (prevStockRef.current?.id !== stock.id || chartDataRef.current.length === 0) {
+      // Filter price history
+      const filteredHistory = stock.history.filter((point) => point.timestamp >= timeLimit)
+      const filteredVolume = stock.volume.filter((point) => point.timestamp >= timeLimit)
 
-    // Ensure we have at least 2 data points for the chart
-    const processedData =
-      filteredHistory.length > 1
-        ? filteredHistory
-        : [...stock.history.slice(-1), { timestamp: now, price: stock.currentValue }]
+      // Ensure we have at least 2 data points for the chart
+      const processedData =
+        filteredHistory.length > 1
+          ? filteredHistory
+          : [...stock.history.slice(-1), { timestamp: now, price: stock.currentValue }]
 
-    // Combine price and volume data
-    const combinedData = processedData.map((point) => {
-      const volumePoint = filteredVolume.find((v) => Math.abs(v.timestamp - point.timestamp) < 5000) // 5 second tolerance
-      return {
-        time: format(new Date(point.timestamp), timeRange === "1m" || timeRange === "5m" ? "HH:mm:ss" : "HH:mm"),
-        price: point.price,
-        volume: volumePoint?.volume || 0,
-        volumeType: volumePoint?.type || "buy",
-        timestamp: point.timestamp,
+      // Combine price and volume data
+      const combinedData = processedData.map((point) => {
+        const volumePoint = filteredVolume.find((v) => Math.abs(v.timestamp - point.timestamp) < 5000) // 5 second tolerance
+        return {
+          time: format(new Date(point.timestamp), timeRange === "1m" || timeRange === "5m" ? "HH:mm:ss" : "HH:mm"),
+          price: point.price,
+          volume: volumePoint?.volume || 0,
+          volumeType: volumePoint?.type || "buy",
+          timestamp: point.timestamp,
+        }
+      })
+
+      setChartData(combinedData)
+      chartDataRef.current = combinedData
+    } else if (prevStockRef.current?.id === stock.id) {
+      // Only add the latest data point if it's newer than what we have
+      const latestHistoryPoint = stock.history[stock.history.length - 1]
+      const latestChartPoint = chartDataRef.current[chartDataRef.current.length - 1]
+
+      if (
+        latestHistoryPoint &&
+        (!latestChartPoint || latestHistoryPoint.timestamp > latestChartPoint.timestamp) &&
+        latestHistoryPoint.timestamp >= timeLimit
+      ) {
+        // Find matching volume data
+        const volumePoint = stock.volume.find((v) => Math.abs(v.timestamp - latestHistoryPoint.timestamp) < 5000)
+
+        // Create new data point
+        const newPoint = {
+          time: format(
+            new Date(latestHistoryPoint.timestamp),
+            timeRange === "1m" || timeRange === "5m" ? "HH:mm:ss" : "HH:mm",
+          ),
+          price: latestHistoryPoint.price,
+          volume: volumePoint?.volume || 0,
+          volumeType: volumePoint?.type || "buy",
+          timestamp: latestHistoryPoint.timestamp,
+        }
+
+        // Add to chart data and remove old points outside time range
+        const updatedChartData = [...chartDataRef.current, newPoint].filter((point) => point.timestamp >= timeLimit)
+
+        setChartData(updatedChartData)
+        chartDataRef.current = updatedChartData
       }
-    })
+    }
 
-    setChartData(combinedData)
+    prevStockRef.current = stock
   }, [stock, timeRange])
 
   if (!stock) {
@@ -162,6 +201,7 @@ export function EnhancedGraphPanel({ stock }: EnhancedGraphPanelProps) {
                   strokeWidth={3}
                   dot={false}
                   activeDot={{ r: 6, fill: "#6366f1" }}
+                  isAnimationActive={false} // Disable animation for smoother updates
                 />
               </LineChart>
             </ResponsiveContainer>
@@ -188,6 +228,7 @@ export function EnhancedGraphPanel({ stock }: EnhancedGraphPanelProps) {
                   dataKey="volume"
                   fill={(entry: any) => (entry.volumeType === "buy" ? "#10b981" : "#ef4444")}
                   name="Volume"
+                  isAnimationActive={false} // Disable animation for smoother updates
                 />
               </BarChart>
             </ResponsiveContainer>

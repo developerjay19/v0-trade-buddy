@@ -12,7 +12,7 @@ import { Edit, X, Target, BarChart3, DollarSign, Users, ArrowUp, ArrowDown } fro
 import { format } from "date-fns"
 
 export default function PortfolioPage() {
-  const { stocks, user, editHolding, closePosition } = useTrading()
+  const { stocks, user, editHolding, closeHolding } = useTrading()
   const [activeTab, setActiveTab] = useState("holdings")
   const [holdingsPage, setHoldingsPage] = useState(1)
   const [historyPage, setHistoryPage] = useState(1)
@@ -177,7 +177,7 @@ export default function PortfolioPage() {
             <Card className="shadow-lg border-0">
               <CardHeader className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white">
                 <CardTitle>Open Holdings</CardTitle>
-                <CardDescription className="text-indigo-100">Your current active positions</CardDescription>
+                <CardDescription className="text-indigo-100">Your current active holdings</CardDescription>
               </CardHeader>
               <CardContent className="p-0">
                 {(() => {
@@ -190,7 +190,7 @@ export default function PortfolioPage() {
                           <tr>
                             <th className="text-left py-3 px-4 font-semibold text-gray-700">Symbol</th>
                             <th className="text-center py-3 px-4 font-semibold text-gray-700">Status</th>
-                            <th className="text-center py-3 px-4 font-semibold text-gray-700">Position Type</th>
+                            <th className="text-center py-3 px-4 font-semibold text-gray-700">Holding Type</th>
                             <th className="text-right py-3 px-4 font-semibold text-gray-700">Quantity</th>
                             <th className="text-right py-3 px-4 font-semibold text-gray-700">Avg Entry</th>
                             <th className="text-right py-3 px-4 font-semibold text-gray-700">Current Price</th>
@@ -218,14 +218,14 @@ export default function PortfolioPage() {
                                 </td>
                                 <td className="py-3 px-4 text-center">
                                   <Badge
-                                    variant={holding.positionType === "long" ? "default" : "destructive"}
+                                    variant={holding.holdingType === "long" ? "default" : "destructive"}
                                     className={
-                                      holding.positionType === "long"
+                                      holding.holdingType === "long"
                                         ? "bg-blue-100 text-blue-800"
                                         : "bg-red-100 text-red-800"
                                     }
                                   >
-                                    {holding.positionType.toUpperCase()}
+                                    {holding.holdingType.toUpperCase()}
                                   </Badge>
                                 </td>
                                 <td className="py-3 px-4 text-right font-medium">{holding.quantity}</td>
@@ -277,7 +277,7 @@ export default function PortfolioPage() {
                                     <Button
                                       variant="outline"
                                       size="sm"
-                                      onClick={() => closePosition(holding.id)}
+                                      onClick={() => closeHolding(holding.id)}
                                       className="text-red-600 hover:text-red-700"
                                     >
                                       <X className="h-3 w-3" />
@@ -300,7 +300,7 @@ export default function PortfolioPage() {
                     <div className="text-center py-12">
                       <BarChart3 className="h-16 w-16 text-gray-400 mx-auto mb-4" />
                       <h3 className="text-xl font-semibold text-gray-900 mb-2">No Open Holdings</h3>
-                      <p className="text-gray-600 mb-6">You don't have any open positions yet.</p>
+                      <p className="text-gray-600 mb-6">You don't have any open holdings yet.</p>
                       <Button asChild>
                         <Link href="/charts">Start Trading</Link>
                       </Button>
@@ -316,7 +316,7 @@ export default function PortfolioPage() {
               <CardHeader className="bg-gradient-to-r from-purple-500 to-indigo-600 text-white">
                 <CardTitle>Holdings History</CardTitle>
                 <CardDescription className="text-purple-100">
-                  Your closed positions and realized profits/losses
+                  Your closed holdings and realized profits/losses
                 </CardDescription>
               </CardHeader>
               <CardContent className="p-0">
@@ -330,7 +330,7 @@ export default function PortfolioPage() {
                           <tr>
                             <th className="text-left py-3 px-4 font-semibold text-gray-700">Symbol</th>
                             <th className="text-center py-3 px-4 font-semibold text-gray-700">Status</th>
-                            <th className="text-center py-3 px-4 font-semibold text-gray-700">Position Type</th>
+                            <th className="text-center py-3 px-4 font-semibold text-gray-700">Holding Type</th>
                             <th className="text-right py-3 px-4 font-semibold text-gray-700">Quantity</th>
                             <th className="text-right py-3 px-4 font-semibold text-gray-700">Avg Entry</th>
                             <th className="text-right py-3 px-4 font-semibold text-gray-700">Avg Exit</th>
@@ -353,14 +353,14 @@ export default function PortfolioPage() {
                               </td>
                               <td className="py-3 px-4 text-center">
                                 <Badge
-                                  variant={holding.positionType === "long" ? "default" : "destructive"}
+                                  variant={holding.holdingType === "long" ? "default" : "destructive"}
                                   className={
-                                    holding.positionType === "long"
+                                    holding.holdingType === "long"
                                       ? "bg-blue-100 text-blue-800"
                                       : "bg-red-100 text-red-800"
                                   }
                                 >
-                                  {holding.positionType.toUpperCase()}
+                                  {holding.holdingType.toUpperCase()}
                                 </Badge>
                               </td>
                               <td className="py-3 px-4 text-right font-medium">{holding.quantity}</td>
@@ -395,8 +395,8 @@ export default function PortfolioPage() {
                   ) : (
                     <div className="text-center py-12">
                       <BarChart3 className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-                      <h3 className="text-xl font-semibold text-gray-900 mb-2">No Closed Positions</h3>
-                      <p className="text-gray-600">You haven't closed any positions yet.</p>
+                      <h3 className="text-xl font-semibold text-gray-900 mb-2">No Closed Holdings</h3>
+                      <p className="text-gray-600">You haven't closed any holdings yet.</p>
                     </div>
                   )
                 })()}

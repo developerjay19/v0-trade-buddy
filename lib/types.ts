@@ -26,7 +26,7 @@ export interface Holding {
   stockId: string
   symbol: string
   status: "open" | "closed"
-  positionType: "long" | "short"
+  holdingType: "long" | "short"
   quantity: number
   averageEntryPrice: number
   averageExitPrice?: number
@@ -48,14 +48,13 @@ export interface Order {
   executionType: "market" | "limit"
   status: "pending" | "open" | "executed" | "cancelled" | "triggered"
   quantity: number
-  price?: number // For limit orders
-  limitPrice?: number // For limit orders
-  stopPrice?: number // For stop loss orders
-  takeProfitPrice?: number // For take profit orders
+  limitPrice?: number
+  stopPrice?: number
+  takeProfitPrice?: number
   createdAt: number
   updatedAt: number
   executedAt?: number
-  executedPrice?: number // Actual execution price
+  executedPrice?: number
   holdingId?: string
 }
 
